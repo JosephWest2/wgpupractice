@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.92"
 bytemuck = { version = "1.19.0", features = ["derive"] }
-cgmath = "0.18.0"
 env_logger = "0.11.5"
 image = { version = "0.25.4", features = ["png", "jpeg"] }
 log = "0.4.22"
+nalgebra = "0.33.2"
 tokio = { version = "1.40.0", features = ["rt", "rt-multi-thread"] }
 wgpu = "22.1.0"
 winit = "0.30.5"
