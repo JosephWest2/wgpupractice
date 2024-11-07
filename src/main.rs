@@ -9,6 +9,7 @@ use winit::{
     window::Window,
 };
 
+mod camera;
 mod texture;
 
 #[repr(C)]
