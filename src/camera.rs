@@ -1,5 +1,4 @@
 use nalgebra::{Matrix4, Point3, Vector3};
-use winit::dpi::PhysicalPosition;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
@@ -25,10 +24,11 @@ pub struct Camera {
 
 impl Camera {
     pub fn get_camera_forward(&self) -> Vector3<f32> {
+        // Defaults to unit vector in the -Z axis
         Vector3::new(
-            self.pitch.cos() * self.yaw.cos(),
-            self.pitch.sin(),
             self.pitch.cos() * self.yaw.sin(),
+            self.pitch.sin(),
+            -1.0 * self.pitch.cos() * self.yaw.cos(),
         )
     }
     pub fn build_view_projection_matrix(&self) -> Matrix4<f32> {
@@ -71,11 +71,6 @@ pub struct CameraController {
     pub right_pressed: bool,
 }
 
-pub struct MouseInput {
-    pub dx: f32,
-    pub dy: f32,
-}
-
 impl CameraController {
     pub fn new(speed: f32, mouse_sens: f32) -> Self {
         Self {
@@ -91,6 +86,7 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera) {
         let forward = camera.get_camera_forward();
+        dbg!(forward);
         let right = forward.cross(&Vector3::y_axis());
         if self.forward_pressed {
             camera.position += forward * self.speed;

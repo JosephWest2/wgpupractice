@@ -3,7 +3,7 @@ use std::{env, sync::Arc};
 use tokio::runtime::Runtime;
 use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler, dpi::PhysicalPosition, event::{DeviceEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::Window
+    application::ApplicationHandler, event::{DeviceEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::Window
 };
 
 mod camera;
@@ -83,6 +83,8 @@ struct WGPUState<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
+    frame_counter: u32,
+    frame_counter_timestamp: std::time::Instant,
 
     // window must outlive surface
     window: Arc<winit::window::Window>,
@@ -299,7 +301,7 @@ impl WGPUState<'_> {
 
         let index_count = INDICES.len() as u32;
 
-        let camera_controller = CameraController::new(0.1, 0.0001);
+        let camera_controller = CameraController::new(0.1, 0.001);
 
         Self {
             window: window.clone(),
@@ -326,6 +328,8 @@ impl WGPUState<'_> {
             camera_buffer,
             camera_bind_group,
             camera_controller,
+            frame_counter: 0,
+            frame_counter_timestamp: std::time::Instant::now(),
         }
     }
 
@@ -481,6 +485,14 @@ impl ApplicationHandler for App<'_> {
                     .submit(std::iter::once(command_encoder.finish()));
                 surface_texture.present();
                 wgpu_state.window.request_redraw();
+                let duration = wgpu_state.frame_counter_timestamp.elapsed();
+                if duration.as_millis() >= 1000 {
+                    eprintln!("FPS > {}", wgpu_state.frame_counter);
+                    wgpu_state.frame_counter = 0;
+                    wgpu_state.frame_counter_timestamp = std::time::Instant::now();
+                } else {
+                    wgpu_state.frame_counter += 1;
+                }
             }
             _ => (),
         }
