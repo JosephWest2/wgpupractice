@@ -3,10 +3,7 @@ use std::{env, sync::Arc};
 use tokio::runtime::Runtime;
 use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::Window,
+    application::ApplicationHandler, dpi::PhysicalPosition, event::{DeviceEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::Window
 };
 
 mod camera;
@@ -201,8 +198,9 @@ impl WGPUState<'_> {
         });
 
         let camera = Camera {
-            eye: Point3::new(0.0, 1.0, 2.0),
-            target: Point3::new(0.0, 0.0, 0.0),
+            position: Point3::new(0.0, 1.0, 2.0),
+            pitch: 0.0,
+            yaw: 0.0,
             up: Vector3::y_axis().into_inner(),
             aspect: surface_config.width as f32 / surface_config.height as f32,
             fovy: 45.0,
@@ -301,7 +299,7 @@ impl WGPUState<'_> {
 
         let index_count = INDICES.len() as u32;
 
-        let camera_controller = CameraController::new(0.1);
+        let camera_controller = CameraController::new(0.1, 0.0001);
 
         Self {
             window: window.clone(),
@@ -351,6 +349,23 @@ impl ApplicationHandler for App<'_> {
             self.wgpu_state = Some(WGPUState::new(event_loop));
         }
         self.wgpu_state.as_mut().unwrap().window.request_redraw();
+    }
+
+    fn device_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            device_id: winit::event::DeviceId,
+            event: DeviceEvent,
+        ) {
+        match event {
+            DeviceEvent::MouseMotion { delta } => {
+                let wgpu_state = self.wgpu_state.as_mut().unwrap();
+                wgpu_state.camera_controller.mouse_delta.0 += delta.0 as f32;
+                wgpu_state.camera_controller.mouse_delta.1 += delta.1 as f32;
+                dbg!("cursor");
+            }
+            _ => ()
+        }
     }
 
     fn window_event(
