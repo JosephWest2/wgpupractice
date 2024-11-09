@@ -1,4 +1,4 @@
-use nalgebra::{Matrix4, Point3, Vector3};
+use nalgebra::{Point3, Vector3};
 use std::{env, sync::Arc};
 use tokio::runtime::Runtime;
 use wgpu::util::DeviceExt;
@@ -10,6 +10,8 @@ use winit::{
 };
 
 mod camera;
+use camera::{Camera, CameraController, CameraUniform};
+
 mod texture;
 
 #[repr(C)]
@@ -65,50 +67,6 @@ const VERTICES: &[Vertex] = &[
 
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
-#[rustfmt::skip]
-const OPENGL_TO_WGPU_MATRIX: Matrix4<f32> = Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
-
-struct Camera {
-    eye: Point3<f32>,
-    target: Point3<f32>,
-    up: Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-impl Camera {
-    fn build_view_projection_matrix(&self) -> Matrix4<f32> {
-        let view = nalgebra::Matrix4::look_at_rh(&self.eye, &self.target, &self.up);
-        let proj = nalgebra::Perspective3::new(self.aspect, self.fovy, self.znear, self.zfar);
-        return OPENGL_TO_WGPU_MATRIX * proj.as_matrix() * view;
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    fn new(camera: &Camera) -> Self {
-        Self {
-            view_proj: camera.build_view_projection_matrix().into(),
-        }
-    }
-
-    fn update_view_projection(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
-    }
-}
-
 struct WGPUState<'a> {
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -127,6 +85,7 @@ struct WGPUState<'a> {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
 
     // window must outlive surface
     window: Arc<winit::window::Window>,
@@ -342,6 +301,8 @@ impl WGPUState<'_> {
 
         let index_count = INDICES.len() as u32;
 
+        let camera_controller = CameraController::new(0.1);
+
         Self {
             window: window.clone(),
             surface,
@@ -366,6 +327,7 @@ impl WGPUState<'_> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
+            camera_controller,
         }
     }
 
@@ -414,14 +376,50 @@ impl ApplicationHandler for App<'_> {
                     a: 1.0,
                 }
             }
+            WindowEvent::KeyboardInput {
+                device_id,
+                event,
+                is_synthetic,
+            } => {
+                let wgpu_state = self.wgpu_state.as_mut().unwrap();
+                use winit::keyboard::KeyCode;
+                use winit::keyboard::PhysicalKey;
+                let is_pressed = event.state.is_pressed();
+                match event.physical_key {
+                    PhysicalKey::Code(KeyCode::KeyA) | PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                        dbg!("Left");
+                        wgpu_state.camera_controller.left_pressed = is_pressed;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyD) | PhysicalKey::Code(KeyCode::ArrowRight) => {
+                        dbg!("Right");
+                        wgpu_state.camera_controller.right_pressed = is_pressed;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyS) | PhysicalKey::Code(KeyCode::ArrowDown) => {
+                        dbg!("Down");
+                        wgpu_state.camera_controller.backward_pressed = is_pressed;
+                    }
+                    PhysicalKey::Code(KeyCode::KeyW) | PhysicalKey::Code(KeyCode::ArrowUp) => {
+                        dbg!("Up");
+                        wgpu_state.camera_controller.forward_pressed = is_pressed;
+                    }
+                    _ => (),
+                }
+            }
             WindowEvent::RedrawRequested => {
-                let wgpu_state = match self.wgpu_state.as_ref() {
+                let wgpu_state = match self.wgpu_state.as_mut() {
                     Some(v) => v,
                     None => {
                         eprintln!("wgpu_state is null!");
                         return;
                     }
                 };
+                wgpu_state.camera_controller.update_camera(&mut wgpu_state.camera);
+                wgpu_state.camera_uniform.update_view_projection(&wgpu_state.camera);
+                wgpu_state.queue.write_buffer(
+                    &wgpu_state.camera_buffer,
+                    0,
+                    bytemuck::cast_slice(&[wgpu_state.camera_uniform]),
+                );
                 let surface_texture = wgpu_state
                     .surface
                     .get_current_texture()
