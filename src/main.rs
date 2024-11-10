@@ -1,9 +1,12 @@
-use nalgebra::{Point3, Vector3};
-use std::{env, sync::Arc};
+use nalgebra::{Isometry3, Matrix4, Point3, Quaternion, Rotation3, Unit, UnitQuaternion, Vector3};
+use std::{env, f32::consts::PI, sync::Arc};
 use tokio::runtime::Runtime;
 use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler, event::{DeviceEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, window::Window
+    application::ApplicationHandler,
+    event::{DeviceEvent, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::Window,
 };
 
 mod camera;
@@ -64,6 +67,62 @@ const VERTICES: &[Vertex] = &[
 
 const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
+struct Instance {
+    translation: Vector3<f32>,
+    rotation: UnitQuaternion<f32>,
+}
+
+impl Instance {
+    fn to_raw(&self) -> InstanceRaw {
+        let translation_matrix = Matrix4::new_translation(&self.translation);
+        let rotation_matrix = self.rotation.to_homogeneous();
+        InstanceRaw {
+            model: (translation_matrix * rotation_matrix).into(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+}
+
+impl InstanceRaw {
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
+                    shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        }
+    }
+}
+
+const INSTANCES_PER_ROW: u32 = 10;
+const INSTANCE_DISPLACEMENT: Vector3<f32> = Vector3::new(1.0, 0.0, 1.0);
+
 struct WGPUState<'a> {
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -85,6 +144,8 @@ struct WGPUState<'a> {
     camera_controller: CameraController,
     frame_counter: u32,
     frame_counter_timestamp: std::time::Instant,
+    instances: Vec<Instance>,
+    instance_buffer: wgpu::Buffer,
 
     // window must outlive surface
     window: Arc<winit::window::Window>,
@@ -242,6 +303,30 @@ impl WGPUState<'_> {
             label: Some("camera_bind_group"),
         });
 
+        let instances = (0..INSTANCES_PER_ROW)
+            .flat_map(|z| {
+                (0..INSTANCES_PER_ROW).map(move |x| {
+                    let translation = Vector3::new(x as f32, 0.0, z as f32) - INSTANCE_DISPLACEMENT;
+                    let rotation = UnitQuaternion::from_axis_angle(
+                        &Unit::new_normalize(translation),
+                        PI / 2.0,
+                    );
+                    Instance {
+                        translation,
+                        rotation,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render pipeline layout"),
@@ -256,7 +341,7 @@ impl WGPUState<'_> {
                 module: &shader,
                 entry_point: "vs_main",
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Vertex::desc()],
+                buffers: &[Vertex::desc(), InstanceRaw::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -330,6 +415,8 @@ impl WGPUState<'_> {
             camera_controller,
             frame_counter: 0,
             frame_counter_timestamp: std::time::Instant::now(),
+            instances,
+            instance_buffer,
         }
     }
 
@@ -356,11 +443,11 @@ impl ApplicationHandler for App<'_> {
     }
 
     fn device_event(
-            &mut self,
-            event_loop: &ActiveEventLoop,
-            device_id: winit::event::DeviceId,
-            event: DeviceEvent,
-        ) {
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
         match event {
             DeviceEvent::MouseMotion { delta } => {
                 let wgpu_state = self.wgpu_state.as_mut().unwrap();
@@ -368,7 +455,7 @@ impl ApplicationHandler for App<'_> {
                 wgpu_state.camera_controller.mouse_delta.1 += delta.1 as f32;
                 dbg!("cursor");
             }
-            _ => ()
+            _ => (),
         }
     }
 
@@ -432,8 +519,12 @@ impl ApplicationHandler for App<'_> {
                         return;
                     }
                 };
-                wgpu_state.camera_controller.update_camera(&mut wgpu_state.camera);
-                wgpu_state.camera_uniform.update_view_projection(&wgpu_state.camera);
+                wgpu_state
+                    .camera_controller
+                    .update_camera(&mut wgpu_state.camera);
+                wgpu_state
+                    .camera_uniform
+                    .update_view_projection(&wgpu_state.camera);
                 wgpu_state.queue.write_buffer(
                     &wgpu_state.camera_buffer,
                     0,
@@ -473,11 +564,12 @@ impl ApplicationHandler for App<'_> {
                     render_pass.set_bind_group(0, &wgpu_state.diffuse_bind_group, &[]);
                     render_pass.set_bind_group(1, &wgpu_state.camera_bind_group, &[]);
                     render_pass.set_vertex_buffer(0, wgpu_state.vertex_buffer.slice(..));
+                    render_pass.set_vertex_buffer(1, wgpu_state.instance_buffer.slice(..));
                     render_pass.set_index_buffer(
                         wgpu_state.index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
                     );
-                    render_pass.draw_indexed(0..wgpu_state.index_count, 0, 0..1);
+                    render_pass.draw_indexed(0..wgpu_state.index_count, 0, 0..wgpu_state.instances.len() as u32);
                 }
 
                 wgpu_state
