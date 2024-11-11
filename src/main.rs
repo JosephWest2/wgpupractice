@@ -1,5 +1,6 @@
 use nalgebra::{Isometry3, Matrix4, Point3, Quaternion, Rotation3, Unit, UnitQuaternion, Vector3};
 use std::{env, f32::consts::PI, sync::Arc};
+use texture::Texture;
 use tokio::runtime::Runtime;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -146,6 +147,7 @@ struct WGPUState<'a> {
     frame_counter_timestamp: std::time::Instant,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+    depth_texture: Texture,
 
     // window must outlive surface
     window: Arc<winit::window::Window>,
@@ -327,6 +329,9 @@ impl WGPUState<'_> {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &surface_config, "depth_texture");
+
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render pipeline layout"),
@@ -362,7 +367,13 @@ impl WGPUState<'_> {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -417,6 +428,7 @@ impl WGPUState<'_> {
             frame_counter_timestamp: std::time::Instant::now(),
             instances,
             instance_buffer,
+            depth_texture,
         }
     }
 
@@ -426,6 +438,8 @@ impl WGPUState<'_> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture =
+                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 }
@@ -555,7 +569,14 @@ impl ApplicationHandler for App<'_> {
                                     store: wgpu::StoreOp::Store,
                                 },
                             })],
-                            depth_stencil_attachment: None,
+                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                                view: &wgpu_state.depth_texture.view,
+                                depth_ops: Some(wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(1.0),
+                                    store: wgpu::StoreOp::Store,
+                                }),
+                                stencil_ops: None,
+                            }),
                             occlusion_query_set: None,
                             timestamp_writes: None,
                         });
@@ -569,7 +590,11 @@ impl ApplicationHandler for App<'_> {
                         wgpu_state.index_buffer.slice(..),
                         wgpu::IndexFormat::Uint16,
                     );
-                    render_pass.draw_indexed(0..wgpu_state.index_count, 0, 0..wgpu_state.instances.len() as u32);
+                    render_pass.draw_indexed(
+                        0..wgpu_state.index_count,
+                        0,
+                        0..wgpu_state.instances.len() as u32,
+                    );
                 }
 
                 wgpu_state
@@ -579,7 +604,7 @@ impl ApplicationHandler for App<'_> {
                 wgpu_state.window.request_redraw();
                 let duration = wgpu_state.frame_counter_timestamp.elapsed();
                 if duration.as_millis() >= 1000 {
-                    eprintln!("FPS > {}", wgpu_state.frame_counter);
+                    eprintln!("FPS: {}", wgpu_state.frame_counter);
                     wgpu_state.frame_counter = 0;
                     wgpu_state.frame_counter_timestamp = std::time::Instant::now();
                 } else {
