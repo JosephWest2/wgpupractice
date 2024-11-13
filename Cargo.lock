@@ -2333,6 +2333,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tobj"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3bd4ba05f29e4c65b6c0c11a58b6465ffa820bac890d76ad407b4e81d8372e8"
+dependencies = [
+ "ahash",
+]
+
+[[package]]
 name = "tokio"
 version = "1.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2785,12 +2794,12 @@ dependencies = [
 name = "wgpu_practice"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bytemuck",
  "env_logger",
  "image",
  "log",
  "nalgebra",
+ "tobj",
  "tokio",
  "wgpu",
  "winit",
