@@ -17,8 +17,6 @@ mod texture;
 mod model;
 use model::{ModelVertex, Vertex};
 
-const INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
-
 struct Instance {
     translation: Vector3<f32>,
     rotation: UnitQuaternion<f32>,
@@ -83,10 +81,6 @@ struct WGPUState<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     draw_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: texture::Texture,
     camera: Camera,
@@ -99,6 +93,7 @@ struct WGPUState<'a> {
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: Texture,
+    obj_model: model::Model,
 
     // window must outlive surface
     window: Arc<winit::window::Window>,
@@ -256,10 +251,13 @@ impl WGPUState<'_> {
             label: Some("camera_bind_group"),
         });
 
+        const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..INSTANCES_PER_ROW).map(move |x| {
-                    let translation = Vector3::new(x as f32, 0.0, z as f32) - INSTANCE_DISPLACEMENT;
+                    let x = SPACE_BETWEEN * (x as f32 - INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - INSTANCES_PER_ROW as f32 / 2.0);
+                    let translation = Vector3::new(x as f32, 0.0, z as f32);
                     let rotation = UnitQuaternion::from_axis_angle(
                         &Unit::new_normalize(translation),
                         PI / 2.0,
@@ -334,19 +332,7 @@ impl WGPUState<'_> {
             cache: None,
         });
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let index_count = INDICES.len() as u32;
+        let obj_model = model::load_model("../static/cube.obj", &device, &queue, &texture_bind_group_layout).unwrap();
 
         let camera_controller = CameraController::new(0.1, 0.001);
 
@@ -364,10 +350,6 @@ impl WGPUState<'_> {
                 a: 1.0,
             },
             render_pipeline,
-            vertex_buffer,
-            vertex_count: VERTICES.len() as u32,
-            index_buffer,
-            index_count,
             diffuse_bind_group,
             diffuse_texture,
             camera,
@@ -380,6 +362,7 @@ impl WGPUState<'_> {
             instances,
             instance_buffer,
             depth_texture,
+            obj_model,
         }
     }
 
@@ -535,17 +518,8 @@ impl ApplicationHandler for App<'_> {
                     render_pass.set_pipeline(&wgpu_state.render_pipeline);
                     render_pass.set_bind_group(0, &wgpu_state.diffuse_bind_group, &[]);
                     render_pass.set_bind_group(1, &wgpu_state.camera_bind_group, &[]);
-                    render_pass.set_vertex_buffer(0, wgpu_state.vertex_buffer.slice(..));
                     render_pass.set_vertex_buffer(1, wgpu_state.instance_buffer.slice(..));
-                    render_pass.set_index_buffer(
-                        wgpu_state.index_buffer.slice(..),
-                        wgpu::IndexFormat::Uint16,
-                    );
-                    render_pass.draw_indexed(
-                        0..wgpu_state.index_count,
-                        0,
-                        0..wgpu_state.instances.len() as u32,
-                    );
+                    model::draw_mesh_instanced(&mut render_pass, &wgpu_state.obj_model.meshes[0], 0..wgpu_state.instances.len() as u32);
                 }
 
                 wgpu_state

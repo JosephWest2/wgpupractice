@@ -1,4 +1,4 @@
-use std::io::{BufReader, Cursor};
+use std::{io::{BufReader, Cursor}, ops::Range};
 
 use wgpu::util::DeviceExt;
 
@@ -18,7 +18,7 @@ pub struct ModelVertex {
 
 impl Vertex for ModelVertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
-       use std::mem;
+        use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -68,7 +68,6 @@ pub fn load_model(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<Model> {
-
     let cursor = Cursor::new(file_name);
     let mut reader = BufReader::new(cursor);
 
@@ -79,9 +78,7 @@ pub fn load_model(
             single_index: true,
             ..Default::default()
         },
-        |path| {
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(path.to_str().unwrap())))
-        }
+        |path| tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(path.to_str().unwrap()))),
     )?;
 
     let mut materials = Vec::new();
@@ -108,55 +105,75 @@ pub fn load_model(
         });
     }
 
-    let meshes = models.into_iter().map(|m| {
-        let vertices = (0..m.mesh.positions.len() / 3).map(|i| {
-            if m.mesh.normals.is_empty() {
-                ModelVertex {
-                    position: [
-                        m.mesh.positions[i * 3],
-                        m.mesh.positions[i * 3 + 1],
-                        m.mesh.positions[i * 3 + 2],
-                    ],
-                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]],
-                    normal: [0.0, 0.0, 0.0],
-                }
-            } else {
-                ModelVertex {
-                    position: [
-                        m.mesh.positions[i * 3],
-                        m.mesh.positions[i * 3 + 1],
-                        m.mesh.positions[i * 3 + 2],
-                    ],
-                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]],
-                    normal: [
-                        m.mesh.normals[i * 3],
-                        m.mesh.normals[i * 3 + 1],
-                        m.mesh.normals[i * 3 + 2],
-                    ],
-                }
+    let meshes = models
+        .into_iter()
+        .map(|m| {
+            let vertices = (0..m.mesh.positions.len() / 3)
+                .map(|i| {
+                    if m.mesh.normals.is_empty() {
+                        ModelVertex {
+                            position: [
+                                m.mesh.positions[i * 3],
+                                m.mesh.positions[i * 3 + 1],
+                                m.mesh.positions[i * 3 + 2],
+                            ],
+                            tex_coords: [
+                                m.mesh.texcoords[i * 2],
+                                1.0 - m.mesh.texcoords[i * 2 + 1],
+                            ],
+                            normal: [0.0, 0.0, 0.0],
+                        }
+                    } else {
+                        ModelVertex {
+                            position: [
+                                m.mesh.positions[i * 3],
+                                m.mesh.positions[i * 3 + 1],
+                                m.mesh.positions[i * 3 + 2],
+                            ],
+                            tex_coords: [
+                                m.mesh.texcoords[i * 2],
+                                1.0 - m.mesh.texcoords[i * 2 + 1],
+                            ],
+                            normal: [
+                                m.mesh.normals[i * 3],
+                                m.mesh.normals[i * 3 + 1],
+                                m.mesh.normals[i * 3 + 2],
+                            ],
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} Index Buffer", file_name)),
+                contents: bytemuck::cast_slice(&m.mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+
+            Mesh {
+                name: file_name.to_string(),
+                vertex_buffer,
+                index_buffer,
+                num_elements: m.mesh.indices.len() as u32,
+                material_id: m.mesh.material_id.unwrap_or(0) as u32,
             }
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{:?} Vertex Buffer", file_name)),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{:?} Index Buffer", file_name)),
-            contents: bytemuck::cast_slice(&m.mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+    Ok(Model { meshes, materials })
+}
 
-        Mesh {
-            name: file_name.to_string(),
-            vertex_buffer,
-            index_buffer,
-            num_elements: m.mesh.indices.len() as u32,
-            material_id: m.mesh.material_id.unwrap_or(0) as u32,
-        }
-    }).collect::<Vec<_>>();
+pub fn draw_mesh(render_pass: &mut wgpu::RenderPass, mesh: &Mesh) {
+    draw_mesh_instanced(render_pass, mesh, 0..1);
+}
 
-    Ok(Model { meshes, materials})
-
+pub fn draw_mesh_instanced(render_pass: &mut wgpu::RenderPass, mesh: &Mesh, instances: Range<u32>) {
+    render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+    render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+    render_pass.draw_indexed(0..mesh.num_elements, 0, instances);
 }
