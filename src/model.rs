@@ -57,3 +57,13 @@ pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
 }
+
+pub fn load_model(
+    file_name: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> anyhow::Result<Model> {
+
+    let obj_text = 
+}

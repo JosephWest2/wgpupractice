@@ -1,6 +1,20 @@
-use anyhow::*;
 use image::GenericImageView;
 
+pub fn load_texture(
+    file_name: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> anyhow::Result<Texture> {
+    let bytes = load_binary(file_name)?;
+    let texture = Texture::from_bytes(device, queue, &bytes, file_name)?;
+    Ok(texture)
+}
+
+pub fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+    let path = std::path::Path::new(file_name);
+    let bin = std::fs::read(path)?;
+    Ok(bin)
+}
 pub struct Texture {
     #[allow(unused)]
     pub texture: wgpu::Texture,
@@ -14,9 +28,10 @@ impl Texture {
         queue: &wgpu::Queue,
         bytes: &[u8],
         label: &str,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let img = image::load_from_memory(bytes)?;
-        Self::from_image(device, queue, &img, Some(label))
+        let texture = Self::from_image(device, queue, &img, Some(label))?;
+        Ok(texture)
     }
 
     pub fn from_image(
@@ -24,7 +39,7 @@ impl Texture {
         queue: &wgpu::Queue,
         img: &image::DynamicImage,
         label: Option<&str>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
 
