@@ -73,7 +73,7 @@ impl InstanceRaw {
 }
 
 const INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: Vector3<f32> = Vector3::new(1.0, 0.0, 1.0);
+const INSTANCE_DISPLACEMENT: Vector3<f32> = Vector3::new(1.0, 0.0, -1.0);
 
 struct WGPUState<'a> {
     surface: wgpu::Surface<'a>,
