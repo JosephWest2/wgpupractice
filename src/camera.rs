@@ -16,6 +16,7 @@ pub struct Camera {
     pub pitch: Rad,
     pub yaw: Rad,
     pub up: Vector3<f32>,
+    // screen width over screen height
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -23,6 +24,18 @@ pub struct Camera {
 }
 
 impl Camera {
+    pub fn new(aspect: f32) -> Self {
+        Self {
+            position: Point3::new(0.0, 1.0, 2.0),
+            pitch: 0.0,
+            yaw: 0.0,
+            up: Vector3::y_axis().into_inner(),
+            aspect,
+            fovy: 45.0,
+            znear: 0.01,
+            zfar: 100.0,
+        }
+    }
     pub fn get_camera_forward(&self) -> Vector3<f32> {
         // Defaults to unit vector in the -Z axis
         Vector3::new(
@@ -40,24 +53,17 @@ impl Camera {
         let proj = nalgebra::Perspective3::new(self.aspect, self.fovy, self.znear, self.zfar);
         return OPENGL_TO_WGPU_MATRIX * proj.as_matrix() * view;
     }
+    pub fn get_uniform(&self) -> CameraUniform {
+        CameraUniform {
+            view_proj: self.build_view_projection_matrix().into(),
+        }
+    }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     pub view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    pub fn new(camera: &Camera) -> Self {
-        Self {
-            view_proj: camera.build_view_projection_matrix().into(),
-        }
-    }
-
-    pub fn update_view_projection(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
-    }
 }
 
 #[derive(Debug)]
@@ -86,7 +92,6 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera) {
         let forward = camera.get_camera_forward();
-        dbg!(forward);
         let right = forward.cross(&Vector3::y_axis());
         if self.forward_pressed {
             camera.position += forward * self.speed;

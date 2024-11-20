@@ -16,7 +16,6 @@ pub fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(bin)
 }
 pub struct Texture {
-    #[allow(unused)]
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
